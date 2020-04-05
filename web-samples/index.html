@@ -2,10 +2,9 @@
 <html>
 
 <head>
-
     <link rel="icon" type="image/png" sizes="96×96" href="./favicon.ico">
 
-    <title>MyScript Unified Sample</title>
+    <title>中文手写</title>
 
     <link type="text/css" rel="stylesheet" href="https://fonts.googleapis.com/css?family=Waiting+for+the+Sunrise">
 
@@ -31,11 +30,13 @@
                 margin: 0;
                 padding: 0;
                 border: 0;
+                height: auto !important;
                 height: 100%;
                 max-height: 100%;
                 overflow-x: hidden;
                 font-family: sans-serif;
                 font-family: "Source Sans Pro";
+                margin-bottom: -50px;
             }
 
             .top-btn {
@@ -70,7 +71,7 @@
 
             #textInput,
             #mathInput {
-                height: calc(100vh - 50px);
+                height: calc(100vh - 50px - 50px);
             }
 
             paper-button,
@@ -94,6 +95,26 @@
                 font-size: 150%;
             }
 
+            #result {
+                height: 49px;
+                margin-left: 38px;
+                margin-right: 38px;
+                position: fixed;
+	            bottom: 0;
+            }
+
+            #errorMsg {
+                height: 49px;
+                position: fixed;
+	            bottom: 0;
+                color: red;
+                z-index: 10;
+                background-color: #fffbe5;
+                width: 100%;
+                display: none;
+                padding: 5px 38px 5px 38px;
+            }
+
         </style>
     </custom-style>
 </head>
@@ -103,24 +124,135 @@
 <header>
     <paper-button id="textButton" toggles>
         <iron-icon class="top-btn" src="./assets/img/demo/myscript-text.svg"></iron-icon>
-        Text
+        文字
     </paper-button>
     <paper-button id="mathButton" toggles>
         <iron-icon class="top-btn" src="./assets/img/demo/myscript-math.svg"></iron-icon>
-        Math
+        数学
     </paper-button>
 </header>
 <div id="content">
     <div class="write-here-wrapper">
-        <div class="write-here hidden">Write here</div>
-        <myscript-text-web id="textInput" class="hidden" host="webdemoapi.myscript.com"
-                           applicationkey="REPLACE_ME"
-                           hmackey="REPLACE_ME" unloaded></myscript-text-web>
+        <div class="write-here hidden">在这里写字</div>
+        <myscript-text-web id="textInput" class="hidden" host="webdemoapi.myscript.com" language="zh_CN"
+                           applicationkey="f041d2a7-3658-4e33-b889-7bb18f47edb2"
+                           hmackey="9aa9ccf6-9d47-43d4-92ae-97b2b5daf533" unloaded></myscript-text-web>
         <myscript-math-web id="mathInput" class="hidden" host="webdemoapi.myscript.com"
-                           applicationkey="REPLACE_ME"
-                           hmackey="REPLACE_ME" unloaded></myscript-math-web>
+                           applicationkey="f041d2a7-3658-4e33-b889-7bb18f47edb2"
+                           hmackey="9aa9ccf6-9d47-43d4-92ae-97b2b5daf533" unloaded></myscript-math-web>
     </div>
 </div>
+<div id="result"></div>
+<div id="errorMsg"></div>
 </body>
+<script type="text/javascript">
+    const myscriptBasicCheckUrl = 'http://127.0.0.1:8080/handwriting/MyScriptBasicCheck';
+    var idleStart, idleEnd;
+    var runningWaitForIdle = false;
+    var resultElement = document.getElementById("result");
+    var errorMsgElement = document.getElementById("errorMsg");
+    var hanChar, strokes;
 
+    textInput.addEventListener('exported', function(event) {
+        if (event && event.detail && event.detail.exports && 'application/vnd.myscript.jiix' in event.detail.exports) {
+            var jiix = JSON.parse(event.detail.exports['application/vnd.myscript.jiix']);
+            if (jiix.words && jiix.words['0'] && jiix.words['0'].label && jiix.words['1'] == undefined) {
+                hanChar = jiix.words['0'].label;
+                strokes = jiix.words['0'].items;
+                if (!runningWaitForIdle) {
+                    textInput.editor.waitForIdle();
+                    runningWaitForIdle = true;
+                }
+            } else {
+                hanChar = undefined;
+                strokes = undefined;
+            }
+        }
+    });
+
+    textInput.addEventListener('idle', function(event) {
+        if (!event.detail.idle) {
+            idleStart = event.timeStamp;
+        } else {
+            idleEnd = event.timeStamp;
+            if (idleEnd - idleStart < 2000) {
+                window.setTimeout(function () {
+                    textInput.editor.waitForIdle();
+                }, 2100 - idleEnd + idleStart);
+            } else {
+                if (!runningWaitForIdle) {
+                    if (hanChar != undefined && strokes != undefined) {
+                        if (checkChinese(hanChar)) {
+                            var result = getStrokeEvalResult(hanChar, JSON.stringify(strokes));
+                            result.then(function(value) {
+                                if (value.result == "error" && value.message.length > 0) {
+                                    errorMsgElement.innerHTML = "【" + value.han + "】" + value.message;
+                                    errorMsgElement.style.display = 'block';
+                                } else {
+                                    errorMsgElement.innerHTML = "";
+                                    errorMsgElement.style.display = 'none';
+                                }
+                                if (value.result == "success" && value.score > 0) {
+                                    resultElement.innerHTML = resultElement.innerHTML ? (resultElement.innerHTML + ", " + value.han + ":" + value.message + "/" + value.score) : (value.han + ":" + value.message + "/" + value.score);
+                                }
+                            });
+                        } else {
+                            errorMsgElement.innerHTML = "【" + hanChar + "】不是一个汉字，无法做笔顺和优美度检查。";
+                        }
+                        hanChar = undefined;
+                        strokes = undefined;
+                    }
+                    textInput.editor.clear();
+                }
+                runningWaitForIdle = false;
+            }
+        }
+    });
+
+    textInput.configuration = {
+        recognitionParams: {
+            v4: {
+                text: {
+                    margin: { // margins in millimeters
+                        top: 20,
+                        left: 10,
+                        right: 10
+                    }
+                },
+                export: {
+                    jiix: {
+                        strokes: true
+                    }
+                }
+            }
+        }
+    };
+
+    function checkChinese(val) {    
+        var reg = new RegExp("[\\u4E00-\\u9FFF]+", "g");
+　　    return reg.test(val);
+    }
+
+    function getStrokeEvalResult(han, myscriptStrokes) {
+        var bodyData = {
+            han: han,
+            strokes: myscriptStrokes
+        };
+        var params = {
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            },
+            body: 'han=' + han + '&strokes=' + myscriptStrokes,
+            method: 'POST'
+        };
+        var result = fetch(myscriptBasicCheckUrl, params)
+            .then(data => {
+                return data.json()
+            })
+            .catch(error => {
+                console.log(error)
+            })
+        return result;
+    }
+</script>
 </html>
