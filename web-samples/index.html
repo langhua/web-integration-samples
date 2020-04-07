@@ -183,19 +183,7 @@
                 if (!runningWaitForIdle) {
                     if (hanChar != undefined && strokes != undefined) {
                         if (checkChinese(hanChar)) {
-                            var result = getStrokeEvalResult(hanChar, JSON.stringify(strokes));
-                            result.then(function(value) {
-                                if (value.result == "error" && value.message.length > 0) {
-                                    errorMsgElement.innerHTML = "【" + value.han + "】" + value.message;
-                                    errorMsgElement.style.display = 'block';
-                                } else {
-                                    errorMsgElement.innerHTML = "";
-                                    errorMsgElement.style.display = 'none';
-                                }
-                                if (value.result == "success" && value.score > 0) {
-                                    resultElement.innerHTML = resultElement.innerHTML ? (resultElement.innerHTML + ", " + value.han + ":" + value.message + "/" + value.score) : (value.han + ":" + value.message + "/" + value.score);
-                                }
-                            });
+                            getStrokeEvalResult(hanChar, JSON.stringify(strokes));
                         } else {
                             errorMsgElement.innerHTML = "【" + hanChar + "】不是一个汉字，无法做笔顺和优美度检查。";
                         }
@@ -228,7 +216,7 @@
         }
     };
 
-    function checkChinese(val) {    
+    function checkChinese(val) {
         var reg = new RegExp("[\\u4E00-\\u9FFF]+", "g");
 　　    return reg.test(val);
     }
@@ -241,14 +229,23 @@
             body: 'han=' + han + '&strokes=' + myscriptStrokes,
             method: 'POST'
         };
-        var result = fetch(myscriptBasicCheckUrl, params)
-            .then(data => {
-                return data.json()
+        fetch(myscriptBasicCheckUrl, params)
+            .then(data => data.json())
+            .then(value => {
+                if (value.result == "error" && value.message.length > 0) {
+                    errorMsgElement.innerHTML = "【" + value.han + "】" + value.message;
+                    errorMsgElement.style.display = 'block';
+                } else {
+                    errorMsgElement.innerHTML = "";
+                    errorMsgElement.style.display = 'none';
+                }
+                if (value.result == "success" && value.score > 0) {
+                    resultElement.innerHTML = resultElement.innerHTML ? (resultElement.innerHTML + ", " + value.han + ":" + value.message + "/" + value.score) : (value.han + ":" + value.message + "/" + value.score);
+                }
             })
             .catch(error => {
                 console.log(error)
             })
-        return result;
     }
 </script>
 </html>
