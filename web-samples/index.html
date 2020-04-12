@@ -12,6 +12,7 @@
     <script type="text/javascript" src="./bower_components/webcomponentsjs/webcomponents-loader.js"></script>
     <script type="text/javascript" src="./bower_components/pepjs/dist/pep.min.js"></script>
     <script type="text/javascript" src="index.js"></script>
+    <script src="./node_modules/animejs/lib/anime.min.js"></script>
 
     <link rel="import" href="./bower_components/paper-button/paper-button.html">
     <link rel="import" href="./bower_components/myscript-text-web/myscript-text-web.html">
@@ -71,7 +72,7 @@
 
             #textInput,
             #mathInput {
-                height: calc(100vh - 50px - 50px);
+                height: calc(100vh - 50px);
             }
 
             paper-button,
@@ -103,6 +104,10 @@
 	            bottom: 0;
             }
 
+            #message {
+                display: none;
+            }
+
             #errorMsg {
                 height: 49px;
                 position: fixed;
@@ -111,8 +116,40 @@
                 z-index: 10;
                 background-color: #fffbe5;
                 width: 100%;
-                display: none;
-                padding: 5px 38px 5px 38px;
+                margin-left: 200px;
+                padding: 5px 38px 5px 25px;
+            }
+
+            #hanSvg{
+                position: fixed;
+	            bottom: 0;
+                display: block;
+                z-index: 20;
+                background-color: #ffffff;
+            }
+
+            path.migrid,
+            path.migriddot {
+                fill: none;
+                stroke: #990000;
+                stroke-width: 1px;
+            }
+
+            path.migriddot {
+                stroke-dasharray: 4 2;
+            }
+
+            path.stdstroke,
+            path.errstroke {
+                fill: none;
+                stroke: #000000;
+                stroke-width: 10px;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+
+            path.errstroke {
+                stroke: #c93756;
             }
 
         </style>
@@ -143,15 +180,23 @@
     </div>
 </div>
 <div id="result"></div>
-<div id="errorMsg"></div>
+<div id="message">
+    <svg id="hanSvg" version="1.1" xmlns="http://www.w3.org/2000/svg" width="200px" height="200px" viewBox="0 0 254 254">
+        <path class="migrid" d="M0 0 L254 0 L254 254 L0 254 Z"/>
+        <path class="migriddot" d="M0 0 L254 254 M0 254 L254 0 M127 0 L 127 254 M 0 127 L254 127"/>
+    </svg>
+    <div id="errorMsg"></div>
+</div>
 </body>
 <script type="text/javascript">
-    const myscriptBasicCheckUrl = 'http://127.0.0.1:8080/handwriting/MyScriptBasicCheck';
+    const myscriptBasicCheckUrl = 'http://localhost:8080/handwriting/MyScriptBasicCheck';
     var idleStart, idleEnd;
     var runningWaitForIdle = false;
     var resultElement = document.getElementById("result");
     var errorMsgElement = document.getElementById("errorMsg");
+    var messageElement = document.getElementById("message");
     var hanChar, strokes;
+    var idleTimeout = 2000;
 
     textInput.addEventListener('exported', function(event) {
         if (event && event.detail && event.detail.exports && 'application/vnd.myscript.jiix' in event.detail.exports) {
@@ -175,12 +220,13 @@
             idleStart = event.timeStamp;
         } else {
             idleEnd = event.timeStamp;
-            if (idleEnd - idleStart < 2000) {
+            if (idleEnd - idleStart < idleTimeout) {
                 window.setTimeout(function () {
                     textInput.editor.waitForIdle();
-                }, 2100 - idleEnd + idleStart);
+                }, idleTimeout + 100 - idleEnd + idleStart);
             } else {
                 if (!runningWaitForIdle) {
+                    clearHanSvg();
                     if (hanChar != undefined && strokes != undefined) {
                         if (checkChinese(hanChar)) {
                             getStrokeEvalResult(hanChar, JSON.stringify(strokes));
@@ -200,19 +246,12 @@
     textInput.configuration = {
         recognitionParams: {
             v4: {
-                text: {
-                    margin: { // margins in millimeters
-                        top: 20,
-                        left: 10,
-                        right: 10
-                    }
-                },
                 export: {
                     jiix: {
                         strokes: true
                     }
                 }
-            }
+            },
         }
     };
 
@@ -234,18 +273,135 @@
             .then(value => {
                 if (value.result == "error" && value.message.length > 0) {
                     errorMsgElement.innerHTML = "【" + value.han + "】" + value.message;
-                    errorMsgElement.style.display = 'block';
+                    messageElement.style.display = 'block';
                 } else {
                     errorMsgElement.innerHTML = "";
-                    errorMsgElement.style.display = 'none';
+                    messageElement.style.display = 'none';
                 }
                 if (value.result == "success" && value.score > 0) {
-                    resultElement.innerHTML = resultElement.innerHTML ? (resultElement.innerHTML + ", " + value.han + ":" + value.message + "/" + value.score) : (value.han + ":" + value.message + "/" + value.score);
+                    var score = Math.round(value.score/2);
+                    if (score >= 95) {
+                        score = 100;
+                    }
+                    resultElement.innerHTML = resultElement.innerHTML ? (resultElement.innerHTML + ", " + value.han + ":" + value.message + "/" + score) : (value.han + ":" + value.message + "/" + score);
+                }
+
+                if (value.stdStrokes != undefined) {
+                    animateStdHanStroke(value.stdStrokes, value.wrongStrokeDirectionAt, value.wrongStrokeAt, value.stdStrokeNum);
                 }
             })
             .catch(error => {
                 console.log(error)
             })
+    }
+
+    function animateStdHanStroke(stdStrokes, wrongStrokeDirectionAt, wrongStrokeAt, stdStrokeNum) {
+        var hanSvg = document.getElementById("hanSvg");
+        var newSvgContent = hanSvg.innerHTML;
+        for (var j = 0; j < stdStrokes.length; j++) {
+            var strokes = stdStrokes[j];
+            var oneStrokePath = '';
+            var isBezier = useBezierCurve(strokes.x, strokes.y);
+            if (isBezier) {
+                switch(strokes.x.length) {
+                    case 3:
+                        // M x0,y0 Q x1,y1 x2,y2
+                        oneStrokePath = "M" + strokes.x[0] + "," + strokes.y[0];
+                        oneStrokePath += " Q" + strokes.x[1] + "," + strokes.y[1] + " " + strokes.x[2] + "," + strokes.y[2];
+                        break;
+                    case 4:
+                        // M x0,y0 C x1,y1 x2,y2 x3,y3
+                        oneStrokePath = "M" + strokes.x[0] + "," + strokes.y[0];
+                        oneStrokePath += " C" + strokes.x[1] + "," + strokes.y[1] + " " + strokes.x[2] + "," + strokes.y[2] + " " + strokes.x[3] + "," + strokes.y[3];
+                        break;
+                    case 5:
+                        // M x0,y0 Q x1,y1 x2,y2 T x4,y4
+                        oneStrokePath = "M" + strokes.x[0] + "," + strokes.y[0];
+                        oneStrokePath += " Q" + strokes.x[1] + "," + strokes.y[1] + " " + strokes.x[2] + "," + strokes.y[2];
+                        oneStrokePath += " T" + strokes.x[4] + "," + strokes.y[4];
+                        break;
+                    case 6:
+                        // M x0,y0 C x1,y1 x2,y2 x3,y3 S x4,y4 x5,y5
+                        oneStrokePath = "M" + strokes.x[0] + "," + strokes.y[0];
+                        oneStrokePath += " C" + strokes.x[1] + "," + strokes.y[1] + " " + strokes.x[2] + "," + strokes.y[2] + " " + strokes.x[3] + "," + strokes.y[3];
+                        oneStrokePath += " S" + strokes.x[4] + "," + strokes.y[4] + " " + strokes.x[5] + "," + strokes.y[5];
+                        break;
+                    case 7:
+                        // M x0,y0 C x1,y1 x2,y2 x3,y3 S x5,y5 x6,y6
+                        oneStrokePath = "M" + strokes.x[0] + "," + strokes.y[0];
+                        oneStrokePath += " C" + strokes.x[1] + "," + strokes.y[1] + " " + strokes.x[2] + "," + strokes.y[2] + " " + strokes.x[3] + "," + strokes.y[3];
+                        oneStrokePath += " S" + strokes.x[5] + "," + strokes.y[5] + " " + strokes.x[6] + "," + strokes.y[6];
+                        break;
+                    default:
+                        for(var i = 0; i < strokes.x.length; i++) {
+                            var x = strokes.x[i];
+                            var y = strokes.y[i];
+                            if (i == 0) {
+                                oneStrokePath += "M" + x + "," + y;
+                            } else {
+                                oneStrokePath += " L" + x + "," + y;
+                            }
+                        }
+                }
+            } else {
+                for(var i = 0; i < strokes.x.length; i++) {
+                    var x = strokes.x[i];
+                    var y = strokes.y[i];
+                    if (i == 0) {
+                        oneStrokePath += "M" + x + "," + y;
+                    } else {
+                        oneStrokePath += " L" + x + "," + y;
+                    }
+                }
+            }
+            if (oneStrokePath != undefined && oneStrokePath.length > 0) {
+                var strokeClass = "stdstroke";
+                if (wrongStrokeDirectionAt == j + 1 || wrongStrokeAt == j + 1) {
+                    strokeClass = "errstroke";
+                }
+                newSvgContent += '\n<path class="' + strokeClass + '" d="' + oneStrokePath + '"/>';
+                if (stdStrokeNum != undefined) {
+                    newSvgContent += '\n<path class="stdstroke"/>';
+                }
+            }
+        }
+        hanSvg.innerHTML = '\n<path class="stdstroke"/>' + newSvgContent + '\n<path class="stdstroke"/>';
+
+        const svgPath = document.querySelectorAll('path.stdstroke, path.errstroke');
+
+        const svgText = anime({
+            targets: svgPath,
+            loop: true,
+            direction: 'normal',
+            strokeDashoffset: [anime.setDashoffset, 0],
+            easing: 'easeInOutSine',
+            duration: 1200,
+            delay: (el, i) => { return i * 1200 }
+        });
+    }
+
+    function clearHanSvg() {
+        var oldStrokes = document.querySelectorAll('path.stdstroke, path.errstroke');
+        for(var i = oldStrokes.length - 1; i >= 0; i--) {
+            if(oldStrokes[i] && oldStrokes[i].parentElement) {
+                oldStrokes[i].parentElement.removeChild(oldStrokes[i]);
+            }
+        }
+    }
+
+    function useBezierCurve(xpts, ypts) {
+        if (xpts.length != ypts.length || xpts.length < 3 || xpts.length > 7) {
+            return false;
+        } else {
+            var isXSimpleIncrease = xpts[0] < xpts[1] ? true : false;
+            var isYSimpleIncrease = ypts[0] < ypts[1] ? true : false;
+            for(var i = 2; i < xpts.length; i++) {
+                if (isXSimpleIncrease != (xpts[i - 1] < xpts[i]) || isYSimpleIncrease != (ypts[i - 1] < ypts[i])) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 </script>
 </html>
