@@ -4,12 +4,19 @@
     <h3>{{ langhuaHandwritingMsg }}</h3>
     <div class="writing-container" touch-action="none" ref="editor" id="editor"></div>
     <div id="result" ref="result"></div>
-    <div id="errorMsg" ref="errorMsg"></div>
+    <div id="message" ref="message">
+      <svg id="hanSvg" ref="hanSvg" version="1.1" xmlns="http://www.w3.org/2000/svg" width="200px" height="200px" viewBox="0 0 254 254">
+        <path class="migrid" d="M0 0 L254 0 L254 254 L0 254 Z"/>
+        <path class="migriddot" d="M0 0 L254 254 M0 254 L254 0 M127 0 L 127 254 M 0 127 L254 127"/>
+      </svg>
+      <div id="errorMsg" ref="errorMsg"></div>
+    </div>
   </div>
 </template>
 
 <script>
 import * as MyScriptJS from 'myscript/src/myscript';
+import anime from 'animejs';
 
 export default {
   name: 'MyScriptJSVueComponent',
@@ -23,6 +30,7 @@ export default {
       idleStart: undefined,
       idleEnd: undefined,
       myscriptBasicCheckUrl: 'http://127.0.0.1:8080/handwriting/MyScriptBasicCheck',
+      idleTimeout: 2000,
     };
   },
   created() {
@@ -94,10 +102,10 @@ export default {
         this.idleStart = event.timeStamp;
       } else {
         this.idleEnd = event.timeStamp;
-        if (this.idleEnd - this.idleStart < 2000) {
+        if (this.idleEnd - this.idleStart < this.idleTimeout) {
           window.setTimeout(() => {
             this.$refs.editor.editor.waitForIdle();
-          }, (2100 + this.idleStart) - this.idleEnd);
+          }, (this.idleTimeout + 100 + this.idleStart) - this.idleEnd);
         } else {
           if (!this.runningWaitForIdle) {
             if (this.hanChar !== undefined && this.strokes !== undefined) {
@@ -135,20 +143,136 @@ export default {
         .then((value) => {
           if (value.result === 'error' && value.message.length > 0) {
             this.$refs.errorMsg.innerHTML = `【${value.han}】${value.message}`;
-            this.$refs.errorMsg.style.display = 'block';
+            this.$refs.message.style.display = 'block';
           } else {
             this.$refs.errorMsg.innerHTML = '';
-            this.$refs.errorMsg.style.display = 'none';
+            this.$refs.message.style.display = 'none';
           }
           if (value.result === 'success' && value.score > 0) {
+            let score = Math.round(value.score / 2);
+            if (score >= 95) {
+              score = 100;
+            }
             this.$refs.result.innerHTML = this.$refs.result.innerHTML
-              ? `${this.$refs.result.innerHTML}, ${value.han}:${value.message}/${value.score}`
-              : `${value.han}:${value.message}/${value.score}`;
+              ? `${this.$refs.result.innerHTML}, ${value.han}:${value.message}/${score}`
+              : `${value.han}:${value.message}/${score}`;
+          }
+          if (value.stdStrokes !== undefined) {
+            this.animateStdHanStroke(value.stdStrokes,
+              value.wrongStrokeDirectionAt,
+              value.wrongStrokeAt,
+              value.stdStrokeNum);
           }
         })
         .catch((error) => {
           window.console.log(error);
         });
+    },
+    animateStdHanStroke(stdStrokes, wrongStrokeDirectionAt, wrongStrokeAt, stdStrokeNum) {
+      const hanSvg = document.getElementById('hanSvg');
+      let newSvgContent = hanSvg.innerHTML;
+      for (let j = 0; j < stdStrokes.length; j += 1) {
+        const strokes = stdStrokes[j];
+        let oneStrokePath = '';
+        const isBezier = this.useBezierCurve(strokes.x, strokes.y);
+        if (isBezier) {
+          switch (strokes.x.length) {
+            case 3:
+              // M x0,y0 Q x1,y1 x2,y2
+              oneStrokePath = `M${strokes.x[0]},${strokes.y[0]}`;
+              oneStrokePath += ` Q${strokes.x[1]},${strokes.y[1]} ${strokes.x[2]},${strokes.y[2]}`;
+              break;
+            case 4:
+              // M x0,y0 C x1,y1 x2,y2 x3,y3
+              oneStrokePath = `M${strokes.x[0]},${strokes.y[0]}`;
+              oneStrokePath += ` C${strokes.x[1]},${strokes.y[1]} ${strokes.x[2]},${strokes.y[2]} ${strokes.x[3]},${strokes.y[3]}`;
+              break;
+            case 5:
+              // M x0,y0 Q x1,y1 x2,y2 T x4,y4
+              oneStrokePath = `M${strokes.x[0]},${strokes.y[0]}`;
+              oneStrokePath += ` Q${strokes.x[1]},${strokes.y[1]} ${strokes.x[2]},${strokes.y[2]}`;
+              oneStrokePath += ` T${strokes.x[4]},${strokes.y[4]}`;
+              break;
+            case 6:
+              // M x0,y0 C x1,y1 x2,y2 x3,y3 S x4,y4 x5,y5
+              oneStrokePath = `M${strokes.x[0]},${strokes.y[0]}`;
+              oneStrokePath += ` C${strokes.x[1]},${strokes.y[1]} ${strokes.x[2]},${strokes.y[2]} ${strokes.x[3]},${strokes.y[3]}`;
+              oneStrokePath += ` S${strokes.x[4]},${strokes.y[4]} ${strokes.x[5]},${strokes.y[5]}`;
+              break;
+            case 7:
+              // M x0,y0 C x1,y1 x2,y2 x3,y3 S x5,y5 x6,y6
+              oneStrokePath = `M${strokes.x[0]},${strokes.y[0]}`;
+              oneStrokePath += ` C${strokes.x[1]},${strokes.y[1]} ${strokes.x[2]},${strokes.y[2]} ${strokes.x[3]},${strokes.y[3]}`;
+              oneStrokePath += ` S${strokes.x[5]},${strokes.y[5]} ${strokes.x[6]},${strokes.y[6]}`;
+              break;
+            default:
+              for (let i = 0; i < strokes.x.length; i += 1) {
+                const x = strokes.x[i];
+                const y = strokes.y[i];
+                if (i === 0) {
+                  oneStrokePath += `M${x},${y}`;
+                } else {
+                  oneStrokePath += ` L${x},${y}`;
+                }
+              }
+          }
+        } else {
+          for (let k = 0; k < strokes.x.length; k += 1) {
+            const xpt = strokes.x[k];
+            const ypt = strokes.y[k];
+            if (k === 0) {
+              oneStrokePath += `M${xpt},${ypt}`;
+            } else {
+              oneStrokePath += ` L${xpt},${ypt}`;
+            }
+          }
+        }
+        if (oneStrokePath !== undefined && oneStrokePath.length > 0) {
+          let strokeClass = 'stdstroke';
+          if (wrongStrokeDirectionAt === j + 1 || wrongStrokeAt === j + 1) {
+            strokeClass = 'errstroke';
+          }
+          newSvgContent += `<path class="${strokeClass}" d="${oneStrokePath}"/>`;
+          if (stdStrokeNum !== undefined) {
+            newSvgContent += '<path class="stdstroke"/>';
+          }
+        }
+      }
+      hanSvg.innerHTML = `\n<path class="stdstroke"/>${newSvgContent}\n<path class="stdstroke"/>`;
+
+      const svgPath = document.querySelectorAll('path.stdstroke, path.errstroke');
+
+      anime({
+        targets: svgPath,
+        loop: true,
+        direction: 'normal',
+        strokeDashoffset: [anime.setDashoffset, 0],
+        easing: 'easeInOutSine',
+        duration: 1200,
+        delay: (el, stroke) => (stroke * 1200),
+      });
+    },
+    clearHanSvg() {
+      const oldStrokes = document.querySelectorAll('path.stdstroke, path.errstroke');
+      for (let i = oldStrokes.length - 1; i >= 0; i -= 1) {
+        if (oldStrokes[i] && oldStrokes[i].parentElement) {
+          oldStrokes[i].parentElement.removeChild(oldStrokes[i]);
+        }
+      }
+    },
+    useBezierCurve(xpts, ypts) {
+      if (xpts.length !== ypts.length || xpts.length < 3 || xpts.length > 7) {
+        return false;
+      }
+      const isXSimpleIncrease = xpts[0] < xpts[1];
+      const isYSimpleIncrease = ypts[0] < ypts[1];
+      for (let i = 2; i < xpts.length; i += 1) {
+        if (isXSimpleIncrease !== (xpts[i - 1] < xpts[i])
+            || isYSimpleIncrease !== (ypts[i - 1] < ypts[i])) {
+          return false;
+        }
+      }
+      return true;
     },
   },
 };
@@ -183,8 +307,10 @@ a {
   margin-right: 38px;
   position: fixed;
   bottom: 0;
-  width: 100%;
-  text-align: left;
+}
+
+#message {
+  display: none;
 }
 
 #errorMsg {
@@ -195,8 +321,40 @@ a {
   z-index: 10;
   background-color: #fffbe5;
   width: 100%;
-  display: none;
-  padding: 5px 38px 5px 38px;
+  margin-left: 200px;
   text-align: left;
+  padding: 5px 38px 5px 25px;
+}
+
+#hanSvg{
+  position: fixed;
+  bottom: 0;
+  display: block;
+  z-index: 20;
+  background-color: #ffffff;
+}
+
+path.migrid,
+path.migriddot {
+  fill: none;
+  stroke: #990000;
+  stroke-width: 1px;
+}
+
+path.migriddot {
+  stroke-dasharray: 4 2;
+}
+
+path.stdstroke,
+path.errstroke {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 10px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+path.errstroke {
+  stroke: #c93756;
 }
 </style>
