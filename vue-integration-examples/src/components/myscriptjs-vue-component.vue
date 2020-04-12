@@ -108,7 +108,7 @@ export default {
           }, (this.idleTimeout + 100 + this.idleStart) - this.idleEnd);
         } else {
           if (!this.runningWaitForIdle) {
-            clearHanSvg();
+            this.clearHanSvg();
             if (this.hanChar !== undefined && this.strokes !== undefined) {
               if (this.checkChinese(this.hanChar)) {
                 this.getStrokeEvalResult(
